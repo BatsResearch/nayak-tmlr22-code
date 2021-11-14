@@ -6,7 +6,7 @@ The code was adapted from `https://github.com/cyvius96/DGP`.
 mkdir data
 cd data
 mkdir subgraphs
-cd data/subgraphs
+cd subgraphs
 ```
 
 Download `ilsvrc_graph.zip`, `awa2_graph.zip`, `apy_graph.zip`, and `wordnet_graph.zip` from [google drive](https://drive.google.com/drive/u/0/folders/1uNXsC4l6hTZQp31edyPxRPcig3_7vhuy) and extract the zip in `data/subgraphs`.
