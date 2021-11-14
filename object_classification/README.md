@@ -4,6 +4,8 @@ The code was adapted from `https://github.com/cyvius96/DGP`.
 ## Setup
 ```
 mkdir data
+cd data
+mkdir subgraphs
 cd data/subgraphs
 ```
 
