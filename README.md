@@ -5,6 +5,8 @@ ZSL-KG is a general-purpose zero-shot learning framework with a novel transforme
 
 This is the codebase for all the experiments mentioned in [Zero-shot Learning with Common Sense Knowledge graphs](https://arxiv.org/abs/2006.10713).
 
+## Code Organization
+
 The code is organized by task, namely:
 
 1. `intent_classification`
