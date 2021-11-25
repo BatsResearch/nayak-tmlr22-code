@@ -2,111 +2,58 @@ import argparse
 import json
 import os
 import os.path as osp
-
+from scipy import io
 import pandas as pd
+
 import torch
 import torch.nn as nn
-from IPython import embed
-from scipy import io
-from torch.utils.data import DataLoader
-from torchvision.models import resnet50, resnet101
-from zsl_kg.data.gbu import GBU
 
-from utils.common import harmonic_mean, set_seed
+from utils import set_seed
+from zsl_kg.data.gbu import GBU
+from torchvision.models import resnet101, resnet50
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
 
-def test_on_subset(
-    dataset,
-    cnn,
-    seen_ids,
-    pred_vectors,
-    all_label,
-    device,
-    gamma=0,
-    consider_trains=False,
-):
-    hit = 0
-    tot = 0
+def get_save_path(_path, pred_file_path, resnet_50, fold):
+    save_path = os.path.join(DIR_PATH, _path)
+    pred_file_name = os.path.basename(pred_file_path)
+    save_path = os.path.join(save_path, pred_file_name)
+    if resnet_50:
+        save_path = os.path.join(save_path, "resnet_50")
+    else:
+        save_path = os.path.join(save_path, "resnet_101")
 
-    loader = DataLoader(
-        dataset=dataset, batch_size=32, shuffle=False, num_workers=4
-    )
-    logits = torch.Tensor()
+    save_path = os.path.join(save_path, "fold_" + str(fold))
 
-    for batch_id, batch in enumerate(loader, 1):
-        data, label = batch
-        data = data.to(device)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
 
-        feat = cnn(data)  # (batch_size, d)
-        feat = torch.cat(
-            [feat, torch.ones(len(feat)).view(-1, 1).to(device)], dim=1
-        )
-
-        fcs = pred_vectors.t()
-
-        table = torch.matmul(feat, fcs)
-        if not consider_trains:
-            table[:, seen_ids] = -1e18
-        else:
-            table[:, seen_ids] -= gamma
-
-        table = table.detach().cpu()
-
-        pred = torch.argmax(table, dim=1)
-        hit += (pred == all_label).sum().item()
-        tot += len(data)
-
-        logits = torch.cat((logits, table), dim=0)
-
-    return hit, tot, logits
+    return save_path
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cnn")
     parser.add_argument("--pred")
     parser.add_argument("--train-dir")
-    parser.add_argument("--gamma", type=float, default=0.0)
-    parser.add_argument("--gpu", default="0")
-    parser.add_argument("--consider-trains", action="store_true")
+    parser.add_argument("--save-path", default="save/finetune-awa2")
     parser.add_argument("--resnet-50", action="store_true")
-
-    parser.add_argument("--output", default=None)
+    parser.add_argument("--num-epochs", default=50, type=int)
+    parser.add_argument("--fold", default=0, type=int)
+    parser.add_argument("--gpu", default="0")
     args = parser.parse_args()
 
-    if torch.cuda.is_available():
-        device = torch.device("cuda:" + args.gpu)
-    else:
-        device = torch.device("cpu")
-    print("device : ", device)
+    # setting seed value
+    set_seed(0)
 
-    pred_file = torch.load(args.pred, map_location="cpu")
-    pred_vectors = pred_file["awa"]
-    pred_vectors = pred_vectors.to(device)
+    # get the saved path for the fine-tuned folder
+    save_path = get_save_path(
+        args.save_path, args.pred, args.resnet_50, args.fold
+    )
 
-    if args.resnet_50:
-        cnn = resnet50(pretrained=True)
-        cnn.fc = nn.Identity()
+    print("save path {}".format(save_path))
 
-        if args.cnn:
-            params = torch.load(args.cnn)
-            del params["fc.weight"]
-            del params["fc.bias"]
-            cnn.load_state_dict(params)
-    else:
-        cnn = resnet101(pretrained=True)
-        cnn.fc = nn.Identity()
-
-        if args.cnn:
-            params = torch.load(args.cnn)
-            del params["fc.weight"]
-            del params["fc.bias"]
-            cnn.load_state_dict(params)
-
-    cnn = cnn.to(device)
-    cnn.eval()
+    pred = torch.load(args.pred)
 
     # load the fold and train/val indices
     dataset_split = io.loadmat(
@@ -116,138 +63,162 @@ if __name__ == "__main__":
         osp.join(DIR_PATH, "datasets/awa2/image_label.csv")
     )
 
-    all_names = []
+    if args.fold > 0:
+        with open(
+            os.path.join(
+                DIR_PATH, f"datasets/awa2/trainclasses{args.fold}.txt"
+            )
+        ) as fp:
+            train_fold_names = [name.strip() for name in fp.readlines()]
+        with open(
+            os.path.join(DIR_PATH, f"datasets/awa2/valclasses{args.fold}.txt")
+        ) as fp:
+            val_fold_names = [name.strip() for name in fp.readlines()]
+    else:
+        awa2_split = json.load(
+            open(osp.join(DIR_PATH, "materials/awa2-split.json"), "r")
+        )
+        train_fold_names = awa2_split["train_names"]
+
+    # load the dataset(s)
+    train_val_loc = dataset_split["trainval_loc"] - 1  # 0-indexed
+    train_val_loc = train_val_loc.squeeze(-1).tolist()
+
+    print("getting train/val indices")
+    if args.fold > 0:
+        train_name_to_idx = dict(
+            [(name, idx) for idx, name in enumerate(train_fold_names)]
+        )
+        val_name_to_idx = dict(
+            [(name, idx) for idx, name in enumerate(val_fold_names)]
+        )
+
+        train_indices = []
+        train_labels = []
+        val_indices = []
+        val_labels = []
+        for _id in train_val_loc:
+            row = image_data.iloc[_id]
+            label = row["label"]
+            if label in train_fold_names:
+                train_indices.append(_id)
+                train_labels.append(train_name_to_idx[label])
+            else:
+                val_indices.append(_id)
+                val_labels.append(val_name_to_idx[label])
+    else:
+        train_indices = [_id for _id in train_val_loc]
+        train_name_to_idx = dict(
+            [(name, idx) for idx, name in enumerate(train_fold_names)]
+        )
+        train_labels = []
+        for _id in train_val_loc:
+            row = image_data.iloc[_id]
+            label = row["label"]
+            train_labels.append(train_name_to_idx[label])
+        val_indices = []
+        val_labels = []
+
+    print("loading the train/val dataset")
+    train_dataset = GBU(
+        args.train_dir, train_indices, train_labels, stage="train"
+    )
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=64,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        sampler=None,
+    )
+
+    print("total training images : {}".format(len(train_dataset)))
+    print("num of classes: {}".format(len(train_fold_names)))
+
+    # TO
     awa2_split = json.load(
         open(osp.join(DIR_PATH, "materials/awa2-split.json"), "r")
     )
-    train_fold_names = awa2_split["train_names"]
-    test_fold_names = awa2_split["test_names"]
-    all_names = train_fold_names + test_fold_names
-    name_to_idx = dict([(name, idx) for idx, name in enumerate(all_names)])
+    train_names = awa2_split["train_names"]
+    name_to_idx = dict([(name, idx) for idx, name in enumerate(train_names)])
 
-    seen_ids = [name_to_idx[name] for name in train_fold_names]
+    train_ids = [name_to_idx[name] for name in train_fold_names]
+    pred_vectors = pred["awa"][train_ids, :]
 
-    # load the dataset(s)
-    test_seen_loc = dataset_split["test_seen_loc"] - 1  # 0-indexed
-    test_seen_loc = test_seen_loc.squeeze(-1).tolist()
-    test_unseen_loc = dataset_split["test_unseen_loc"] - 1
-    test_unseen_loc = test_unseen_loc.squeeze(-1).tolist()
+    print("pred vector shape {}".format(pred_vectors.size()))
 
-    if args.consider_trains:
-        all_test_loc = test_seen_loc + test_unseen_loc
-        assert len(all_test_loc) == 5882 + 7913
+    if args.resnet_50:
+        model = resnet50(pretrained=True)
     else:
-        all_test_loc = test_unseen_loc
-        test_seen_loc = []
-        assert len(all_test_loc) == 7913
+        model = resnet101(pretrained=True)
 
-    train_labels = []
-    name_to_indices = dict([(name, []) for name in all_names])
-    for _id in all_test_loc:
-        row = image_data.iloc[_id]
-        label = row["label"]
-        name_to_indices[label].append(_id)
+    fcw = pred_vectors
 
-    ave_acc = 0
-    ave_acc_n = 0
-    ave_seen_acc = 0.0
-    ave_unseen_acc = 0.0
-    seen_n = 0
-    unseen_n = 0
+    model.fc.weight = nn.Parameter(fcw[:, :-1])
+    model.fc.bias = nn.Parameter(fcw[:, -1])
 
-    results = {}
-    print("pred: {}".format(args.pred))
-    print("num train : {}".format(len(train_fold_names)))
-    print(
-        "num test seen {}, num test unseen {}".format(
-            len(test_seen_loc), len(test_unseen_loc)
-        )
-    )
-    print("gamma {}".format(args.gamma))
+    model.fc.weight.requires_grad = False
+    model.fc.bias.requires_grad = False
 
-    for i, name in enumerate(all_names, 0):
-        if not name_to_indices[name]:
-            continue
+    model = model.cuda()
+    model.train()
+    #
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.0001, momentum=0.9)
+    loss_fn = nn.CrossEntropyLoss().cuda()
 
-        dataset = GBU(
-            args.train_dir,
-            name_to_indices[name],
-            [i] * len(name_to_indices[name]),
-            stage="test",
-        )
-        hit, tot, logits = test_on_subset(
-            dataset,
-            cnn,
-            seen_ids,
-            pred_vectors,
-            i,
-            device,
-            gamma=args.gamma,
-            consider_trains=args.consider_trains,
-        )
-        acc = hit / tot
-        ave_acc += acc
-        ave_acc_n += 1
+    keep_ratio = 0.9975
+    trlog = {}
+    trlog["loss"] = []
+    trlog["acc"] = []
 
-        if name in train_fold_names:
-            ave_seen_acc += acc
-            seen_n += 1
-        else:
-            ave_unseen_acc += acc
-            unseen_n += 1
+    for epoch in range(0, args.num_epochs):
 
-        print(
-            "{} {}: {:.2f}%".format(i + 1, name.replace("+", " "), acc * 100)
-        )
+        ave_loss = None
+        ave_acc = None
 
-        # all_logits[name] = logits.cpu()
-    if args.consider_trains:
-        assert seen_n == 40
-        assert unseen_n == 10
-    else:
-        assert seen_n == 0
-        assert unseen_n == 10
+        for i, (data, label) in enumerate(train_loader, 1):
+            data = data.cuda()
+            label = label.cuda()
 
-    if args.consider_trains:
-        ave_seen_acc = ave_seen_acc / seen_n
-        ave_unseen_acc = ave_unseen_acc / unseen_n
-        h = harmonic_mean(ave_seen_acc, ave_unseen_acc)
-        print(
-            "gamma: {:.2f}"
-            "unseen: {:.2f} seen: {:2f} H: {} ".format(
-                args.gamma, ave_unseen_acc * 100, ave_seen_acc * 100, h * 100
+            logits = model(data)
+            loss = loss_fn(logits, label)
+
+            _, pred = torch.max(logits, dim=1)
+            acc = torch.eq(pred, label).type(torch.FloatTensor).mean().item()
+
+            if i == 1:
+                ave_loss = loss.item()
+                ave_acc = acc
+            else:
+                ave_loss = ave_loss * keep_ratio + loss.item() * (
+                    1 - keep_ratio
+                )
+                ave_acc = ave_acc * keep_ratio + acc * (1 - keep_ratio)
+
+            print(
+                "epoch {}, {}/{}, loss={:.4f} ({:.4f}), acc={:.4f} ({:.4f})".format(
+                    epoch,
+                    i,
+                    len(train_loader),
+                    loss.item(),
+                    ave_loss,
+                    acc,
+                    ave_acc,
+                )
             )
-        )
-        data = {"h": h, "seen": ave_seen_acc, "unseen": ave_unseen_acc}
-    else:
-        ave_unseen_acc = ave_unseen_acc / unseen_n
-        print("unseen {:.2f}".format(ave_unseen_acc * 100.0))
-        data = {"unseen": ave_unseen_acc}
 
-    # get path for result if gamma not present
-    if not args.cnn:
-        pred_file_name = os.path.basename(args.pred)
-        result_path = os.path.join(DIR_PATH, f"save/awa2/{pred_file_name}")
-        if not os.path.exists(result_path):
-            os.makedirs(result_path)
-        if args.consider_trains:
-            result_path = os.path.join(
-                result_path, f"result_gamma_{args.gamma}.json"
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        trlog["loss"].append(ave_loss)
+        trlog["acc"].append(ave_acc)
+
+        torch.save(trlog, osp.join(save_path, "trlog"))
+        if (epoch + 1) % 5 == 0:
+            torch.save(
+                model.state_dict(),
+                osp.join(save_path, "epoch-{}.pth".format(epoch)),
             )
-        else:
-            result_path = os.path.join(result_path, f"result_unseen.json")
-
-        print(f"saving result at {result_path}")
-        with open(result_path, "w+") as fp:
-            json.dump(data, fp)
-    else:
-        if args.consider_trains:
-            result_path = args.cnn[:-4] + "_result.json"
-        else:
-            result_path = args.cnn[:-4] + "_result_unseen.json"
-
-        print(f"saving result at {result_path}")
-        with open(result_path, "w+") as fp:
-            json.dump(data, fp)
 
     print("done!")
