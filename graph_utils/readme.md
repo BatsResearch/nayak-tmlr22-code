@@ -1,9 +1,8 @@
 ## Graph preprocessing
 
 ### Example
-We include the scripts to query ImageNet graph, post-process, compute union
-of the grpah, get initial node features, and run
-random walk on the graph.
+We include the scripts to query ImageNet graph, compute node features, run
+random walk, and save the graph.
 
 ## setup
 
