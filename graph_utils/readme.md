@@ -1,15 +1,26 @@
 ## Graph preprocessing
 
 ### Example
-We include the scripts to query ImageNet graph, post-process, compute union
-of the grpah, get initial node features, and run
-random walk on the graph.
+We include the scripts to query ImageNet graph, compute node features, run
+random walk, and save the graph.
+
+## setup
+
+```
+mkdir data
+cd data
+wget https://nlp.stanford.edu/data/glove.840B.300d.zip
+unzip glove.840B.300d.zip
+wget -nc https://storage.googleapis.com/taglets-public/scads.spring2021.sqlite3
+```
+
+## knowledge graph construction
 
 ```
 python main.py
 ```
 
-You may need to edit the paths for `DATABASE_PATH`, `GRAPH_PATH`, and `GLOVE_PATH` in the main file.
+You may need to edit the paths for `DATABASE_PATH`, `GRAPH_PATH`, and `GLOVE_PATH` in the `main.py`.
 
 ### ConceptNet Schema
 We query three tables from the conceptnet database.

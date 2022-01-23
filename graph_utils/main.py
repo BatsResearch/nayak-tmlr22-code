@@ -1,48 +1,39 @@
 import os
-from conceptnet import query_conceptnet
 from graph import (
-    post_process_graph,
-    compute_union_graph,
     compute_embeddings,
-    compute_mapping,
 )
-from random_walk import graph_random_walk
 
 from imagenet_syns import IMAGENET_SYNS
-from idx_to_concept import IDX_TO_CONCEPT_IMGNET
+from query import query_conceptnet
+
+from allennlp.common.params import Params
+from zsl_kg.knowledge_graph.conceptnet import ConceptNetKG
 
 
-def graph_setup(syns, graph_path, database_path, glove_path, id_to_concept):
+def graph_setup(syns, database_path, glove_path):
 
-    query_conceptnet(graph_path, syns, database_path)
+    nodes, edges, relations = query_conceptnet(syns, database_path)
 
-    # post process graph
-    post_process_graph(graph_path)
+    features = compute_embeddings(nodes, glove_path)
 
-    # take the union of the graph
-    compute_union_graph(graph_path)
+    params = Params({"bidirectional": True})
 
-    # run random walk on the graph
-    graph_random_walk(graph_path, k=20, n=10)
+    kg = ConceptNetKG(
+        nodes["uri"].tolist(),
+        features,
+        edges.values.tolist(),
+        relations["uri"].tolist(),
+        params,
+    )
+    kg.run_random_walk()
 
-    # compute embeddings for the nodes
-    compute_embeddings(graph_path, glove_path)
-
-    # compute mapping
-    compute_mapping(id_to_concept, graph_path)
-
-    print("completed graph related processing!")
+    kg.save_to_disk("data/example_graph")
 
 
-print("example graph")
-os.makedirs("data/example_graph")
-
-DATABASE_PATH = "data/conceptnet.db"
+DATABASE_PATH = "data/scads.spring2021.sqlite3"
 GRAPH_PATH = "data/example_graph"
 GLOVE_PATH = "data/glove.840B.300d.txt"
 
-graph_setup(
-    IMAGENET_SYNS, GRAPH_PATH, DATABASE_PATH, GLOVE_PATH, IDX_TO_CONCEPT_IMGNET
-)
+graph_setup(IMAGENET_SYNS, DATABASE_PATH, GLOVE_PATH)
 
 print("and done!")
