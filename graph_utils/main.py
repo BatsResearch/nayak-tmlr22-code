@@ -55,6 +55,9 @@ def graph_setup(syns, database_path, glove_path, self_loop=False):
     )
     kg.run_random_walk()
 
+    if self_loop:
+        assert len(kg.adj_lists) == len(kg.rw_adj_lists)
+
     kg.save_to_disk("data/example_graph")
 
     return kg
