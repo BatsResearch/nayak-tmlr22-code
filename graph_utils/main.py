@@ -49,7 +49,7 @@ def graph_setup(syns, database_path, glove_path, self_loop=False):
     kg = ConceptNetKG(
         nodes["uri"].tolist(),
         features,
-        mapped_edges,
+        mapped_edges.values.tolist(),
         relations["uri"].tolist(),
         params,
     )
