@@ -37,9 +37,9 @@ We include all the knowledge graph-related data for the experiments on [google d
 Please cite the following [paper](https://arxiv.org/abs/2006.10713) if you are using our framework.
 
 ```
-@article{nayak:arxiv20,
-  Author = {Nayak, Nihal V. and Bach, Stephen H.},
+@article{nayak:tmlr22,
+  Author = {Nayak, N. V. and Bach, S. H.},
   Title = {Zero-Shot Learning with Common Sense Knowledge Graphs},
-  Volume = {arXiv:2006.10713 [cs.LG]},
-  Year = {2020}}
+  Journal = {Transactions on Machine Learning Research (TMLR)},
+  Year = {2022}}
 ```
